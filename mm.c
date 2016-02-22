@@ -39,29 +39,28 @@ team_t team = {
 #define SWORD 4
 #define DWORD 8
 
-/* Get the thingy */
-#define GET(p) (*(int *)(p))
+/* Pack a size of allocated bit into a word */
+#define PACK(size, alloc) ((size) | (alloc))
+
+/* read and write a word at addr p */
+#define GET(p) (*(unsigned int *)(p))
+#define PUT(p, val) (*(unsigned int *)(p) = (val))
 
 /* rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(size) (((size) + (DWORD-1)) & ~0x7)
 #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
 
-/* chk for allocated size from header or footer
-allocate unit is in word allocate 2 word equal to 8 byte or double word  */
-#define ALLOCATED(p) (GET(p)  & 0x1) //true or false
-#define ALLOC_SIZE(p) (GET(p)  & ~0x7) //pull the size from header
+/* read the size of allocated fields from addr p */
+#define GET_SIZE(p) (GET(p) & ~0x7)
+#define GET_ALLOC(p) (GET(p) & 0x1)
 
-/* pull the header and footer from bpt */
-#define HEAD(bpt) (*(int *) (bpt))
-//#define FOOT(bpt) *((int *) bpt + ALLOC_SIZE(HEAD(bpt)))
+/* Given block ptr bp, compute addr of its header and footer */
+#define HDRP(bp) ((char *)(bp) - SWORD)
+#define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - DWORD)
 
-/* go to next or previous allocated block return as an int  bpt on the prev or next block bpt */
-#define PREV_BLOCK(bpt) (int *) (bpt) - ALLOC_SIZE((int *) (bpt) - 1) - 1
-#define NEXT_BLOCK(bpt) (int *) (bpt) + ALLOC_SIZE((int *) (bpt)) + 1
-
-/* put payload or free block on the specified bpt */
-#define PUT_HEAD(bpt, alloc_size, alloc) *((int *)bpt) = (alloc | alloc_size)
-#define PUT_FOOT(bpt, alloc_size, alloc) *((int *) bpt + alloc) = (alloc | alloc_size)
+/* Gicen block ptr bp, compute addr of next and previous block */
+#define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - DWORD)))
+#define PRE_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DWORD)))
 
 /* 
  * mm_init - initialize the malloc package.
