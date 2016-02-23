@@ -58,23 +58,68 @@ team_t team = {
 #define HDRP(bp) ((char *)(bp) - SWORD)
 #define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - DWORD)
 
-/* Gicen block ptr bp, compute addr of next and previous block */
+/* Given block ptr bp, compute addr of next and previous block */
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - DWORD)))
 #define PRE_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DWORD)))
+
+#define CHUNKSIZE (1 << 12)
+
+void *heap_p;
+static void *extend_heap(size_t words) {
+    char *bp;
+    size_t size;
+    if (words % 2 == 0){
+        size = words;
+    }else{
+        size = words + 1;
+    }
+    if((bp = mem_sbrk(size)) == -1)
+        return NULL;
+    PUT(HDRP(bp), PACK(size, 0));
+    PUT(HDRP(bp), PACK(size, 0));
+    PUT(NEXT_BLKP(bp), PACK(0, 1));
+    return (void *) bp;
+    //coalsce the thingy 
+
+}
+
+int mm_check(void){
+    int bc = 0;
+    void *pt;
+    // for (pt = heap_p; (GET_SIZE(pt) != 0) && (GET_ALLOC(pt) != 1); pt+= SWORD){
+    //     printf("Current Header block num is %d Alloc : %d, Size : %d \n",bc, GET_ALLOC(pt), GET_SIZE(HDRP(pt)));
+    //     printf("Current block footer num is %d Alloc : %d, Size : %d \n", bc, GET_ALLOC(FTRP(pt)), GET_SIZE(FTRP(pt)));
+    //     bc++;
+    // }
+    for (pt = heap_p; pt <= heap_p + 2 * DWORD; pt+= SWORD){
+        printf("Current block num is %d Alloc : %d, Size : %d \n",bc, GET(pt) & 0x1, GET(pt) & ~0x7);
+        //printf("Current block footer num is %d Alloc : %d, Size : %d \n", bc, GET_ALLOC(FTRP(pt)), GET_SIZE(FTRP(pt)));
+        bc++;
+    }
+
+}
 
 /* 
  * mm_init - initialize the malloc package.
  */
 int mm_init(void)
 {
-    void *stptr = mem_sbrk(16);
-    stptr = (int *) (stptr + 1);
-    PUT_HEAD(stptr, 2, 1);
-    stptr = (int *) (stptr + 1);
-    PUT_HEAD(stptr, 2, 1);
-    PUT_FOOT(stptr, 0, 1);
+    if ((heap_p = mem_sbrk(4 * SWORD)) == -1)
+        return -1; 
+    PUT(heap_p + (1 * SWORD), PACK(DWORD, 1));
+    PUT(heap_p + (2 * SWORD), PACK(DWORD, 1));
+    PUT(heap_p + (3 * SWORD), PACK(0,1));
+    printf("Before Extend\n");
+    mm_check();
+    heap_p += 2 * SWORD;
+    // if ((extend_heap(CHUNKSIZE/SWORD)) == NULL) {
+    //     return -1;
+    // }
+    //printf("After Extend\n");
+    //mm_check();
     return 0;
 }
+
 
 /* 
  * mm_malloc - Allocate a block by incrementing the brk pointer.
@@ -91,20 +136,6 @@ void *mm_malloc(size_t size)
         *(size_t *)p = size;
         return (void *)((char *)p + SIZE_T_SIZE);
     }
-}
-
-int mm_check(void){
-	int *strpt = (int *)mem_heap_lo();
-	int *lastpt = (int *)mem_heap_hi();
-	int bc = 0;
-	int *pt;
-	for (pt = strpt + 1; pt <= lastpt; pt++) {
-		printf("Current block pt is %d bpt is on %x",bc,  &pt);
-		//printf("Header block info: Allocated: %d, Alloc_Size: %d", ALLOCATED(HEAD(pt)), ALLOC_SIZE(HEAD(pt)));
-		//printf("Footer block info: Allocated: %d, Alloc_Size: %d", ALLOCATED(FOOT(pt)), ALLOC_SIZE(FOOT(pt)));
-		bc++;
-	}
-
 }
 
 /*
