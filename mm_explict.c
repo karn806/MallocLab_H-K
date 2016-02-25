@@ -79,6 +79,8 @@ team_t team = {
 #define SUCC(ptr) ((char *)(ptr))
 #define PRED(ptr) ((char *)(ptr+ SWORD))
 #define debug_me() printf("%s:%d I'm here\n",__FILE__, __LINE__)
+#define print_snp(bp) printf("suc : %x, pred: %x\n", GET(SUCC(bp)), GET(SUCC(bp)) );
+#define print_hdrp(bp) printf("header adr: %x, size: %d, alloc: %d\n", HDRP(bp), GET_SIZE(HDRP(bp)), GET_ALLOC(HDRP(bp)) );
 
 void *heap_listp;
 void *root_listp;
@@ -92,10 +94,10 @@ static void remove_lst(void *ptr);
     int bc = 0;
     void *pt;
     for (pt = heap_listp; (GET_SIZE(HDRP(pt)) != 0) ; pt = NEXT_BLKP(pt) ){
-        printf("Header # %d, Size: %d, Alloc %d\n", bc, GET_SIZE(HDRP(pt)), GET_ALLOC(HDRP(pt)));
-        printf("Footer # %d, Size: %d, Alloc %d\n", bc, GET_SIZE(FTRP(pt)), GET_ALLOC(FTRP(pt)));
+        printf("Header # %x, Size: %d, Alloc %d\n", pt, GET_SIZE(HDRP(pt)), GET_ALLOC(HDRP(pt)));
+        printf("Footer # %x, Size: %d, Alloc %d\n", pt, GET_SIZE(FTRP(pt)), GET_ALLOC(FTRP(pt)));
         if (GET_ALLOC(HDRP(pt)) == 0){
-            printf("BLK # %d, SUCC_PT: %x, PRED_PT: %x\n", GET(SUCC(pt)), GET(PRED(pt)));
+            printf("BLK # %x, SUCC_PT: %x, PRED_PT: %x\n", pt, GET(SUCC(pt)), GET(PRED(pt)));
         }
         printf("Current root_listp is: %x, size: %d, alloc: %d\n", root_listp, GET_SIZE(HDRP(root_listp)), 
             GET_ALLOC(HDRP(root_listp)));
@@ -105,6 +107,7 @@ static void remove_lst(void *ptr);
 }
 int mm_init(void)
 {
+    debug_me();
     char *bp;
 
     /* Create the initial empty heap */
@@ -137,18 +140,22 @@ static void add_lst(void *ptr){
         GET_ALLOC(HDRP(root_listp)));
     printf("current succ: %x, cur_pred: %x\n", SUCC(temp_bp), PRED(temp_bp));
     printf("current succ: %x, cur_pred: %x\n", SUCC(root_listp), PRED(root_listp) );
-    debug_me();
-    PUT(SUCC(ptr), temp_bp); //change current succ pointer to the recent free block
-    debug_me();
-    PUT(PRED(temp_bp), ptr); //change recent free block pred to the current new root ptr
+    if (GET(SUCC(ptr)) && GET(PRED(ptr))){
+        debug_me();
+        PUT(SUCC(ptr), temp_bp); //change current succ pointer to the recent free block
+        debug_me();
+        PUT(PRED(temp_bp), ptr); //change recent free block pred to the current new root ptr
+    }
     printf("Add successful yeh!\n");
 }
 
 static void remove_lst(void *ptr){
     void *cur_pred = GET(PRED(ptr)); //get pointer of pred
     void *cur_suc = GET(SUCC(ptr)); // get pointer of suc
-    PUT(cur_pred, cur_suc); // swap to merge them together
-    PUT(cur_suc + SWORD, cur_pred);
+    if (cur_pred != NULL && cur_suc != NULL){
+        PUT(cur_pred, cur_suc); // swap to merge them together
+        PUT(cur_suc + SWORD, cur_pred);
+    }
 }
 
 static void *coalesce(void *ptr)
@@ -233,20 +240,33 @@ static void place(void *ptr, size_t asize)
     size_t csize = GET_SIZE(HDRP(ptr));
 
     if ((csize - asize) >= (2*DWORD)) {
+        debug_me();
         PUT(HDRP(ptr), PACK(asize, 1));
         PUT(FTRP(ptr), PACK(asize, 1));
         void *old_pred = GET(PRED(ptr));
         void *old_succ = GET(SUCC(ptr));
+        printf("old_pred: %x, old_succ: %x\n", old_pred, old_succ);
         /* pointer shift to the next alrdy */
         ptr = NEXT_BLKP(ptr);
-        PUT(PRED(ptr), old_pred);
-        PUT(SUCC(ptr), old_succ);
-        PUT(old_pred, ptr);
-        PUT(old_succ + SWORD, ptr);
         PUT(HDRP(ptr), PACK(csize-asize, 0));
         PUT(FTRP(ptr), PACK(csize-asize, 0));
+        root_listp = ptr;
+        if (old_pred != NULL && old_succ != NULL){
+            debug_me();
+            PUT(PRED(ptr), old_pred);
+            PUT(SUCC(ptr), old_succ);
+            print_hdrp(ptr);
+            print_snp(ptr);
+            print_hdrp(old_pred);
+            PUT(old_pred, ptr);
+            PUT(old_succ + SWORD, ptr);
+            debug_me();
+        }
+        debug_me();
+            
     }
     else {
+        debug_me();
         PUT(HDRP(ptr), PACK(csize, 1));
         PUT(FTRP(ptr), PACK(csize, 1));
         remove_lst(ptr);
@@ -259,6 +279,8 @@ static void place(void *ptr, size_t asize)
  */
 void *mm_malloc(size_t size)
 {
+    debug_me();
+    printf("malloc with size %d\n", size);
     size_t asize;       /* Adjusted block size */
     size_t extendsize;  /* Amount to extend heap if no fit */
     char *ptr;
@@ -275,10 +297,13 @@ void *mm_malloc(size_t size)
 
     /* Search the free list for a fit */
     if ((ptr = find_fit(asize)) != NULL) {
+        debug_me();
         place(ptr, asize);
+        debug_me();
         return ptr;
     }
     /* No fit found. Get more memory and place the block */
+
     extendsize = MAX(asize,CHUNKSIZE);
     if ((ptr = extend_heap(extendsize/SWORD)) == NULL)
         return NULL;
