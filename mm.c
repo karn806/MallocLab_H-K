@@ -58,6 +58,10 @@ team_t team = {
 #define HDRP(bp) ((char *)(bp) - SWORD)
 #define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - DWORD)
 
+/* Given block ptr bp, compute addr of NEXT and PREV (only on free block ALLOC = 0) */
+#define NEXT(bp) ((char * )(bp))
+#define PREV(bp) ((char * )(bp) + SWORD)
+
 /* Given block ptr bp, compute addr of next and previous block */
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - DWORD)))
 #define PRE_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DWORD)))
@@ -65,6 +69,7 @@ team_t team = {
 #define CHUNKSIZE (1 << 12)
 
 void *heap_p;
+void *root_p;
 static void *extend_heap(size_t words) {
     char *bp;
     size_t size;
@@ -76,27 +81,88 @@ static void *extend_heap(size_t words) {
     if((bp = mem_sbrk(size)) == -1)
         return NULL;
     PUT(HDRP(bp), PACK(size, 0));
-    PUT(HDRP(bp), PACK(size, 0));
+    PUT(FTRP(bp), PACK(size, 0));
+    PUT(NEXT(bp), NULL);
+    PUT(PREV(bp), NULL);
+    root_p = bp;
     PUT(NEXT_BLKP(bp), PACK(0, 1));
     return (void *) bp;
-    //coalsce the thingy 
+    coalesce(bp);
 
 }
 
-int mm_check(void){
+/* Check the block individually best use to see if init properly */
+int mm_precheck(void){
     int bc = 0;
     void *pt;
-    // for (pt = heap_p; (GET_SIZE(pt) != 0) && (GET_ALLOC(pt) != 1); pt+= SWORD){
-    //     printf("Current Header block num is %d Alloc : %d, Size : %d \n",bc, GET_ALLOC(pt), GET_SIZE(HDRP(pt)));
-    //     printf("Current block footer num is %d Alloc : %d, Size : %d \n", bc, GET_ALLOC(FTRP(pt)), GET_SIZE(FTRP(pt)));
-    //     bc++;
-    // }
-    for (pt = heap_p; pt <= heap_p + 2 * DWORD; pt+= SWORD){
+    for (pt = heap_p; pt < heap_p + (2 * DWORD); pt+= SWORD){
         printf("Current block num is %d Alloc : %d, Size : %d \n",bc, GET(pt) & 0x1, GET(pt) & ~0x7);
         //printf("Current block footer num is %d Alloc : %d, Size : %d \n", bc, GET_ALLOC(FTRP(pt)), GET_SIZE(FTRP(pt)));
         bc++;
     }
 
+}
+/* Check Header and footer of all Free or unallocated block */
+int mm_check(void){
+	int bc = 0;
+	void *pt;
+	for (pt = heap_p + DWORD; GET_SIZE(FTRP(pt)) != 0 && GET_ALLOC(FTRP(pt)) != -1 ; pt = NEXT_BLKP(pt)){
+		printf("Header # %d, Size: %d, Alloc %d\n", bc, GET_SIZE(HDRP(pt)), GET_ALLOC(HDRP(pt)));
+		printf("Footer # %d, Size: %d, Alloc %d\n", bc, GET_SIZE(FTRP(pt)), GET_ALLOC(FTRP(pt)));
+		/* print prev and next pointer if GETALLOC = 0 */
+		if (GET_ALLOC(HDRP(pt)) == 0){
+			printf("NEXT # %d, PT: %x \n", bc, GET(NEXT(pt)));
+			printf("PREV # %d, PT: %x\n", bc, GET(PREV(pt)));
+		}
+	}
+}
+
+static void *coalesce(void *bp){
+	/* freeing with LIFO policy */
+	size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
+	size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+	size_t size = GET_SIZE(HDRP(bp));
+	/*Case 1 Insert the free block at the root of the list (when next and prev block is not free) */
+	if (prev_alloc && next_alloc){
+		PUT(NEXT(bp), root_p); //asign next to root of the lst
+		PUT(PREV(bp), NULL); //set pred as null
+		PUT(PREV(root_p), bp); //point the prev of root_p to current bp
+		root_p = bp; //make the newly freed block as the root of the free lst
+		return bp;
+	}
+
+	/*Case 2 when Next block is free but prev is not free, cut out successor block and insert new 
+	block at the root of the lst */
+	else if (!next_alloc && prev_alloc){
+		size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
+		PUT(HDRP(bp), PACK(size , 0));
+		PUT(FTRP(bp), PACK(size , 0));
+		/* join the prev block because it is gone now */
+		void * next_bpt = NEXT_BLKP(bp);
+		PUT(NEXT(NEXT_BLKP(bp)), bp);
+		PUT(NEXT(bp), root_p);
+		PUT(PREV(bp), NULL);
+		PUT(PREV(root_p) , bp);
+		root_p = bp;
+		return bp;
+	}
+
+	/*Case 3 When Prev block is free but next block is not free, cut predecessor block and insert new block 
+	at the root of the lst */
+
+	else if (!prev_alloc && next_alloc){
+		size+= GET_SIZE(HDRP(PREV_BLKP(bp)));
+		PUT(FTRP(bp), PACK(size, 0));
+		PUT(FTRP(bp), PACK(size, 0));
+		bp = PREV_BLKP(bp)
+
+	}
+
+	/*Case 4 When Prev and Next bp is free Splice predecessor and successor blocks, coalesce all 3 mem
+	block together and insert the new block at the root of the lst */
+	else {
+		size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
+	}
 }
 
 /* 
@@ -110,13 +176,13 @@ int mm_init(void)
     PUT(heap_p + (2 * SWORD), PACK(DWORD, 1));
     PUT(heap_p + (3 * SWORD), PACK(0,1));
     printf("Before Extend\n");
-    mm_check();
+    mm_precheck();
     heap_p += 2 * SWORD;
-    // if ((extend_heap(CHUNKSIZE/SWORD)) == NULL) {
-    //     return -1;
-    // }
-    //printf("After Extend\n");
-    //mm_check();
+    if ((extend_heap(CHUNKSIZE/SWORD)) == NULL) {
+        return -1;
+    }
+    printf("After Extend\n");
+    mm_check();
     return 0;
 }
 
@@ -127,7 +193,20 @@ int mm_init(void)
  */
 void *mm_malloc(size_t size)
 {
-    mm_check();
+	size_t asize;
+	size_t extendsize;
+	char *bp;
+	/*Ignore stupid req */
+	if (size == 0)
+		return NULL;
+	/* adjust block size to include overhead and alignment req */
+	if (asize <= DWORD)
+		asize = 2*DWORD;
+	else
+		asize = DWORD * ((size + DWORD + (DWORD - 1)) / DWORD); //amount of Double Word Block times the size of the block
+
+	/*implement explict alloc*/
+
     int newsize = ALIGN(size + SIZE_T_SIZE);
     void *p = mem_sbrk(newsize);
     if (p == (void *)-1)
@@ -139,10 +218,16 @@ void *mm_malloc(size_t size)
 }
 
 /*
- * mm_free - Freeing a block does nothing.
- */
+* mm_free - Freeing a block does nothing.
+*/
+ 
 void mm_free(void *ptr)
 {
+	// size_t size = GET_SIZE(HDRP(bp));
+	// PUT(HDRP(bp), PACK(size , 0));
+	// PUT(FTRP(bp), PACK(size, 0));
+	
+	//coalesce(bp)
 }
 
 /*
